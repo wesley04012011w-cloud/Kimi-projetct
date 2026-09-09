@@ -13,75 +13,71 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout do código
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Encontrar e extrair o ZIP
       - name: Find and extract project ZIP
         run: |
           echo "=== Arquivos na raiz do repo ==="
           ls -la
           echo ""
-
-          # Encontra o primeiro arquivo .zip
+          
           ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-
+          
           if [ -z "$ZIP_FILE" ]; then
             echo "❌ Nenhum arquivo .zip encontrado na raiz!"
             exit 1
           fi
-
+          
           echo "📦 ZIP encontrado: $ZIP_FILE"
-
-          # Extrai o zip
-          unzip "$ZIP_FILE" -d extracted_project
-
+          
+          # Extrai mantendo o nome original da pasta interna
+          unzip "$ZIP_FILE"
+          
           echo ""
           echo "=== Arquivos extraídos ==="
-          ls -la extracted_project/
-
-          # Encontra a pasta do projeto (geralmente é a única pasta dentro)
-          PROJECT_DIR=$(find extracted_project -maxdepth 1 -mindepth 1 -type d | head -n 1)
-
+          ls -la
+          
+          # Procura package.json na raiz da extração OU em subpastas de primeiro nível
+          PROJECT_DIR=""
+          
+          if [ -f "package.json" ]; then
+            PROJECT_DIR="."
+            echo "✅ package.json encontrado na raiz"
+          else
+            for dir in $(find . -maxdepth 1 -mindepth 1 -type d); do
+              if [ -f "$dir/package.json" ]; then
+                PROJECT_DIR="$dir"
+                echo "✅ package.json encontrado em: $dir"
+                break
+              fi
+            done
+          fi
+          
           if [ -z "$PROJECT_DIR" ]; then
-            echo "❌ Nenhuma pasta encontrada dentro do ZIP!"
+            echo "❌ package.json não encontrado em lugar nenhum!"
+            find . -maxdepth 2 -type d
             exit 1
           fi
-
-          echo "📁 Pasta do projeto: $PROJECT_DIR"
-
-          # Verifica se tem package.json
-          if [ ! -f "$PROJECT_DIR/package.json" ]; then
-            echo "❌ package.json não encontrado em $PROJECT_DIR"
-            echo "=== Conteúdo da pasta ==="
-            ls -la "$PROJECT_DIR"
-            exit 1
-          fi
-
-          echo "✅ package.json encontrado!"
-
-          # Salva o caminho para os próximos steps
+          
+          PROJECT_DIR=$(realpath "$PROJECT_DIR")
+          echo "📁 Diretório do projeto: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
 
-      # 3. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 4. Setup Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      # 5. Setup Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 6. Instalar dependências (dentro da pasta do projeto)
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -95,19 +91,16 @@ jobs:
             yarn install
           fi
 
-      # 7. Expo Prebuild
       - name: Expo Prebuild
         working-directory: ${{ env.PROJECT_DIR }}
         run: npx expo prebuild --platform android --clean
 
-      # 8. Build do APK (Release)
       - name: Build Release APK
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
-      # 9. Upload do APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -115,7 +108,6 @@ jobs:
           path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
-      # 10. (Opcional) Criar Release no GitHub
       - name: Create GitHub Release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
@@ -125,10 +117,10 @@ jobs:
           name: Release v${{ github.run_number }}
           body: |
             🚀 Nova versão do OnDevice AI
-
+            
             - Build automático via GitHub Actions
             - APK pronto para instalação
-
+            
             **Como instalar:**
             1. Baixe o APK
             2. No Android, habilite "Fontes desconhecidas"
