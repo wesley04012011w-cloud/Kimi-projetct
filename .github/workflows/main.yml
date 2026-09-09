@@ -22,7 +22,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       # 3. Setup Java (necessário para Android)
       - name: Setup Java
@@ -38,8 +37,16 @@ jobs:
       # 5. Instalar dependências
       - name: Install dependencies
         run: |
-          npm install -g yarn
-          yarn install --frozen-lockfile
+          # Tenta yarn primeiro (packageManager do package.json aponta yarn)
+          if [ -f "yarn.lock" ]; then
+            npm install -g yarn
+            yarn install --frozen-lockfile
+          elif [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install -g yarn
+            yarn install
+          fi
 
       # 6. Expo Prebuild (gera arquivos nativos Android)
       - name: Expo Prebuild
