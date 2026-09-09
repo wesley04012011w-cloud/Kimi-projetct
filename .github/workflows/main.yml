@@ -78,7 +78,6 @@ jobs:
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          # Apaga lockfiles inválidos/fakes e instala do zero
           rm -f package-lock.json yarn.lock
           npm install -g yarn
           yarn install
