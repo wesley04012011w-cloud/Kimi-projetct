@@ -30,15 +30,12 @@ jobs:
           fi
           
           echo "📦 ZIP encontrado: $ZIP_FILE"
-          
-          # Extrai mantendo o nome original da pasta interna
           unzip "$ZIP_FILE"
           
           echo ""
           echo "=== Arquivos extraídos ==="
           ls -la
           
-          # Procura package.json na raiz da extração OU em subpastas de primeiro nível
           PROJECT_DIR=""
           
           if [ -f "package.json" ]; then
@@ -55,7 +52,7 @@ jobs:
           fi
           
           if [ -z "$PROJECT_DIR" ]; then
-            echo "❌ package.json não encontrado em lugar nenhum!"
+            echo "❌ package.json não encontrado!"
             find . -maxdepth 2 -type d
             exit 1
           fi
@@ -81,15 +78,10 @@ jobs:
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          if [ -f "yarn.lock" ]; then
-            npm install -g yarn
-            yarn install --frozen-lockfile
-          elif [ -f "package-lock.json" ]; then
-            npm ci
-          else
-            npm install -g yarn
-            yarn install
-          fi
+          # Apaga lockfiles inválidos/fakes e instala do zero
+          rm -f package-lock.json yarn.lock
+          npm install -g yarn
+          yarn install
 
       - name: Expo Prebuild
         working-directory: ${{ env.PROJECT_DIR }}
