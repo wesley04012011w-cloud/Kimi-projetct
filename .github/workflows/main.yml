@@ -1,120 +1,91 @@
-name: Build Android APK
+name: Build Android from ZIP
 
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
+  push:
+    paths:
+      - 'pocketpal-local-llm.zip'
+      - '.github/workflows/build-android-from-zip.yml'
+
+env:
+  LLAMA_CPP_REF: master
+  NDK_VERSION: '28.1.13356709'
+  NODE_VERSION: '22'
 
 jobs:
-  build-apk:
-    name: Build APK
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and extract project ZIP
+      - name: Extract project ZIP
         run: |
-          echo "=== Arquivos na raiz do repo ==="
-          ls -la
-          echo ""
-          
-          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-          
-          if [ -z "$ZIP_FILE" ]; then
-            echo "❌ Nenhum arquivo .zip encontrado na raiz!"
-            exit 1
-          fi
-          
-          echo "📦 ZIP encontrado: $ZIP_FILE"
-          unzip "$ZIP_FILE"
-          
-          echo ""
-          echo "=== Arquivos extraídos ==="
-          ls -la
-          
-          PROJECT_DIR=""
-          
-          if [ -f "package.json" ]; then
-            PROJECT_DIR="."
-            echo "✅ package.json encontrado na raiz"
-          else
-            for dir in $(find . -maxdepth 1 -mindepth 1 -type d); do
-              if [ -f "$dir/package.json" ]; then
-                PROJECT_DIR="$dir"
-                echo "✅ package.json encontrado em: $dir"
-                break
-              fi
-            done
-          fi
-          
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "❌ package.json não encontrado!"
-            find . -maxdepth 2 -type d
-            exit 1
-          fi
-          
-          PROJECT_DIR=$(realpath "$PROJECT_DIR")
-          echo "📁 Diretório do projeto: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+          rm -rf workspace
+          mkdir workspace
+          unzip -q pocketpal-local-llm.zip -d workspace
+          test -f workspace/package.json
+          test -d workspace/android
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: temurin
           java-version: '17'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workspace/package-lock.json
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          rm -f package-lock.json yarn.lock
-          npm install -g yarn
-          yarn install
+      - name: Install Android NDK
+        run: sdkmanager "ndk;${NDK_VERSION}"
 
-      - name: Expo Prebuild
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: npx expo prebuild --platform android --clean
+      - name: Install npm dependencies
+        working-directory: workspace
+        run: npm install
 
-      - name: Build Release APK
-        working-directory: ${{ env.PROJECT_DIR }}/android
+      - name: Fetch llama.cpp
+        working-directory: workspace
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          mkdir -p third_party
+          git clone https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
+          cd third_party/llama.cpp
+          git checkout "${LLAMA_CPP_REF}"
+
+      - name: Build web
+        working-directory: workspace
+        run: npm run build:web
+
+      - name: Copy web assets
+        working-directory: workspace
+        run: |
+          rm -rf android/app/src/main/assets/public
+          mkdir -p android/app/src/main/assets/public
+          cp -R dist/. android/app/src/main/assets/public/
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+
+      - name: Build APK
+        working-directory: workspace/android
+        env:
+          ANDROID_NDK: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          gradle wrapper --gradle-version 8.10
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
+          name: localpal-debug-apk
+          path: workspace/android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/app-release.apk
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
-          body: |
-            🚀 Nova versão do OnDevice AI
-            
-            - Build automático via GitHub Actions
-            - APK pronto para instalação
-            
-            **Como instalar:**
-            1. Baixe o APK
-            2. No Android, habilite "Fontes desconhecidas"
-            3. Instale o APK
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
